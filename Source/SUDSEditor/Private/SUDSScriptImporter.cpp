@@ -1187,6 +1187,7 @@ bool FSUDSScriptImporter::ParseTextLine(const FStringView& InLine,
 		FString remainingText = Text;
 		while (remainingText.Len() > maxLen)
 		{
+			// TODO Jonas: Split line at sentence terminators preferably.
 			const FString& part = remainingText.Left(maxLen);
 			Ctx.LastTextNodeIdx = AppendNode(Tree, FSUDSParsedNode(Speaker, part, TextID, metaData, IndentLevel, LineNo));
 			TextID = GenerateTextID(Line);
@@ -1823,6 +1824,10 @@ void FSUDSScriptImporter::PopulateAssetFromTree(USUDSScript* Asset,
 								prev->AddEdge(edge);
 
 								prev = TextNode;
+
+								// TODO Jonas: Fix IndexRemap to return the first node in a text continuation for
+								// incoming edges while at the same time returning the last node for outgoing edges.
+								// Also check splitting parsed nodes into multiple script nodes breaks localization.
 
 								str.RightChopInline(len);
 							}
