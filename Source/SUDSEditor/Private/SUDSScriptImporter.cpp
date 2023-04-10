@@ -1180,7 +1180,20 @@ bool FSUDSScriptImporter::ParseTextLine(const FStringView& InLine,
 		{
 			TextID = GenerateTextID(Line);
 		}
-		Ctx.LastTextNodeIdx = AppendNode(Tree, FSUDSParsedNode(Speaker, Text, TextID, GetTextMetadataForNextEntry(IndentLevel), IndentLevel, LineNo));
+
+		auto metaData = GetTextMetadataForNextEntry(IndentLevel);
+
+		int maxLen = 100;
+		FString remainingText = Text;
+		while (remainingText.Len() > maxLen)
+		{
+			const FString& part = remainingText.Left(maxLen);
+			Ctx.LastTextNodeIdx = AppendNode(Tree, FSUDSParsedNode(Speaker, part, TextID, metaData, IndentLevel, LineNo));
+			TextID = GenerateTextID(Line);
+
+			remainingText.RightChopInline(maxLen);
+		}
+		Ctx.LastTextNodeIdx = AppendNode(Tree, FSUDSParsedNode(Speaker, remainingText, TextID, metaData, IndentLevel, LineNo));
 
 		ReferencedSpeakers.AddUnique(Speaker);
 		
@@ -1737,6 +1750,11 @@ FMD5Hash FSUDSScriptImporter::CalculateHash(const TCHAR* Buffer, int32 Len)
 	
 }
 
+bool IsSentenceTerminator(TCHAR Letter)
+{
+	return Letter == TEXT('.') || Letter == TEXT('!') || Letter == TEXT('?');
+}
+
 void FSUDSScriptImporter::PopulateAssetFromTree(USUDSScript* Asset,
                                                 const FSUDSScriptImporter::ParsedTree& Tree,
                                                 TArray<USUDSScriptNode*>* pOutNodes,
@@ -1777,9 +1795,45 @@ void FSUDSScriptImporter::PopulateAssetFromTree(USUDSScript* Asset,
 							StringTable->GetMutableStringTable()->SetMetaData(InNode.TextID, Pair.Key, Pair.Value);	
 						}
 						
-						auto TextNode = NewObject<USUDSScriptNodeText>(Asset);
-						TextNode->Init(InNode.Identifier, FText::FromStringTable (StringTable->GetStringTableId(), InNode.TextID), InNode.SourceLineNo);
-						Node = TextNode;
+						const FText& text = FText::FromStringTable(StringTable->GetStringTableId(), InNode.TextID);
+						FString str = text.ToString();
+
+						const int maxStringLength = 100;
+						if (true || str.Len() < maxStringLength)
+						{
+							auto TextNode = NewObject<USUDSScriptNodeText>(Asset);
+							TextNode->Init(InNode.Identifier, text, InNode.SourceLineNo);
+							Node = TextNode;
+						}
+						else
+						{
+							USUDSScriptNode* prev = Node;
+							while (str.Len() > maxStringLength)
+							{
+								int lastTerminatorIndex = str.FindLastCharByPredicate(IsSentenceTerminator, maxStringLength);
+								int len = (lastTerminatorIndex == INDEX_NONE) ? maxStringLength : lastTerminatorIndex + 1;
+								const FString& part = str.Left(len);
+
+								auto TextNode = NewObject<USUDSScriptNodeText>(Asset);
+								TextNode->Init(InNode.Identifier, FText::FromString(part), InNode.SourceLineNo);
+								pOutNodes->Add(TextNode);
+								OutIndex++;
+
+								FSUDSScriptEdge edge(TextNode, ESUDSEdgeType::Continue, InNode.SourceLineNo);
+								prev->AddEdge(edge);
+
+								prev = TextNode;
+
+								str.RightChopInline(len);
+							}
+
+							{
+								auto TextNode = NewObject<USUDSScriptNodeText>(Asset);
+								TextNode->Init(InNode.Identifier, FText::FromString(str), InNode.SourceLineNo);
+								Node = TextNode;
+							}
+						}
+
 						break;
 					}
 				case ESUDSParsedNodeType::Choice:
